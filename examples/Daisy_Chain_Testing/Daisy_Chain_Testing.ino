@@ -9,12 +9,15 @@ After arduino power on or reset, the status LED should light up one by one.
 #include <Wire.h>
 #include "VL53L0X.h"
 
+
+//User should change the number of sensors here.
 #define NUM_OF_SENSORS 9
+
 
 
 VL53L0X sensor[NUM_OF_SENSORS];
 
-#define STARTING_ADDRESS 0x10
+#define STARTING_ADDRESS 0x01
 uint8_t address[NUM_OF_SENSORS];
 
 #define STARTING_CHIP_XSHUTN_PIN 2
@@ -26,9 +29,11 @@ void setup()
 	Wire.begin();
 
 	//Initialize the I2C address array.
+	uint8_t addressOffset = 0; //Avoid using default address 0x52 as new address.
 	for (uint8_t index = 0; index < NUM_OF_SENSORS; index++)
 	{
-		address[index] = STARTING_ADDRESS + index;
+		if( (STARTING_ADDRESS + index) == 0x52) addressOffset = 1;
+		address[index] = STARTING_ADDRESS + index + addressOffset;
 	}
 
 	/* Chip shutdown in now controlled by XSHUTN, using a NMOS inverter.
