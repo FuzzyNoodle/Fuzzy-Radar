@@ -1,58 +1,70 @@
 /*
-Using continuous mode for this example. Multiple sensors
-can keep in this mode without affecting each other.
+Raw Data Serial Output
+
+This sketch is used to output distance data to serial windows.
+The distance is in millimeters. 
 
 */
 
 #include <Wire.h>
 #include "VL53L0X.h"
 
+
+//User should change the number of sensors here.
 #define NUM_OF_SENSORS 9
+
+
 
 VL53L0X sensor[NUM_OF_SENSORS];
 
-#define STARTING_ADDRESS 0x60
+#define STARTING_ADDRESS 0x53
 uint8_t address[NUM_OF_SENSORS];
 
 #define STARTING_CHIP_XSHUTN_PIN 2
 
-
 uint32_t readDataTimer;
-#define READ_DATA_DURATION 25
+#define READ_DATA_DURATION 24
 
 uint16_t distance[NUM_OF_SENSORS];
-
 #define DEBUG_PRINT_TO_SERIAL
+
+#define MAX_RANGE 1000
 
 void setup()
 {
-	Serial.begin(500000);
-	Serial.println("Starting sketch.");
+	Serial.begin(115200);
+	Serial.println("Starting sketch - Fuzzy Radar - Raw Data Serial Output.");
 	Wire.begin();
 
+	//Initialize the I2C address array.
+	uint8_t addressOffset = 0; //Avoid using default address 0x52 as new address.
 	for (uint8_t index = 0; index < NUM_OF_SENSORS; index++)
 	{
-		address[index] = STARTING_ADDRESS + index;
+		if ((STARTING_ADDRESS + index) == 0x52) addressOffset = 1;
+		address[index] = STARTING_ADDRESS + index + addressOffset;
 	}
 
 	/* Chip shutdown in now controlled by XSHUTN, using a NMOS inverter.
 	XSHUTN is not pulled up nor pulled down.
 	Only the first chip is controlled by arduino pin
 	*/
-		
+
+	Serial.println("Set chip 0 into reset mode.");
 	pinMode(STARTING_CHIP_XSHUTN_PIN, OUTPUT);
 	digitalWrite(STARTING_CHIP_XSHUTN_PIN, HIGH);//set chip 0 into reset mode. All subsequent chips should go into reset mode as well.
-	
-	delay(1000);
+	Serial.println("All status LEDs should be off.");
+	//delay(2000);
+
+
+	Serial.println("Now configuring the sensors. LED should light up one by one.");
+	//delay(1000);
 
 	for (uint8_t index = 0; index < NUM_OF_SENSORS; index++)
 	{
-		Serial.print("Enable chip index = ");
+		Serial.print("Configuring chip ");
 		Serial.println(index);
+
 		//Bring one chip out of reset mode
-
-		//sensor[index].writeReg(11, 0x01);//SYSTEM_INTERRUPT_CLEAR
-
 		if (index == 0)
 		{
 			//First chip
@@ -61,80 +73,52 @@ void setup()
 		else
 		{
 			//Subsequent chips, index = 1,2,3,4...
-			sensor[index-1].setGPIO(LOW); //Enable chips other than the first chip
+			sensor[index - 1].setGPIO(LOW); //Enable chips other than the first chip
 		}
-		delay(5);
-		//delay(100);
+		delay(5);//Required for VL53L0X firmware booting.
 
-
-		Serial.print("Reset I2C address to ");
+		Serial.print("  - Reset I2C address to ");
 		Serial.println(address[index]);
 		sensor[index].setAddress(address[index]);
-		//delay(100);
-		
 
-		Serial.println("Init.");
+		Serial.println("  - Initialize the sensor.");
 		sensor[index].init();
-		delay(100);
-		//blink();
-
-		Serial.println("Set Timeout");
 		sensor[index].setTimeout(500);
-		delay(1000);
-	}
 
+		//delay(1000);
+	}
+	Serial.println("Radar array configuration completed.");
+
+
+	//Start continuous reading mode.
 	for (uint8_t index = 0; index < NUM_OF_SENSORS; index++)
 	{
-		Serial.print("Start continuous reading for chip ");
+		Serial.print("Start continuous ranging mode for chip ");
 		Serial.println(index);
 		sensor[index].startContinuous(20);
 	}
-
-	
 }
 
 void loop()
 {
-	readData();
-}
-
-void blink()
-{
-	while (1)
+	if (millis() - readDataTimer >= READ_DATA_DURATION)
 	{
-		Serial.println("Set GPIO high.");
-		sensor[0].setGPIO(HIGH);
-		delay(2000);
-
-		Serial.println("Set GPIO low.");
-		sensor[0].setGPIO(LOW);
-		delay(2000);
+		//The time required for new data is around 21-22 ms.
+		readDataTimer = millis();
+		readData();
+		#ifdef DEBUG_PRINT_TO_SERIAL
+		printDataToSerial();
+		#endif
 	}
-
 }
 
 void readData()
 {
-
-	/*
-	High speed mode takes around 23-24 ms for each reading.
-	Continuous reading takes around 1ms.
-	*/
-
-
-	if (millis() - readDataTimer < READ_DATA_DURATION) return;
-	readDataTimer = millis();
-
-	uint16_t num[NUM_OF_SENSORS];
 	for (uint8_t index = 0; index < NUM_OF_SENSORS; index++)
 	{
 		distance[index] = sensor[index].readReg16Bit(sensor[index].RESULT_RANGE_STATUS + 10);
-		if (distance[index] > 1000) distance[index] = 0;
+		if (distance[index] > MAX_RANGE) distance[index] = 0;
 	}
-
-	#ifdef DEBUG_PRINT_TO_SERIAL
-	printDataToSerial();
-	#endif
 }
 
 void printDataToSerial()

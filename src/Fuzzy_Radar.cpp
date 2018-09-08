@@ -8,40 +8,128 @@
 #include "Fuzzy_Radar.h"
 
 
-FuzzyRadar::FuzzyRadar()
+FuzzyRadar::FuzzyRadar(uint8_t _numberOfSensors)
+	:sensor(new VL53L0X[_numberOfSensors])
+	,address(new uint8_t[_numberOfSensors])
+	,distance(new int16_t[_numberOfSensors])
+	,weight(new float[_numberOfSensors])
 {
+	numberOfSensors = _numberOfSensors;
 
 }
-
-void FuzzyRadar::begin()
+FuzzyRadar::~FuzzyRadar() 
 {
-	for (uint8_t index = 0; index < NUM_OF_SENSORS; index++)
+	free(address);
+	address = NULL;
+
+	free(distance);
+	distance = NULL;
+
+	free(weight);
+	weight = NULL;
+}
+
+void FuzzyRadar::begin(uint8_t _xshutnPin, uint8_t _seperationDegrees)
+{
+	xshutnPin = _xshutnPin;
+	seperationDegrees = _seperationDegrees;
+	startingSensorIndex = 0;
+	endingSensorIndex = numberOfSensors-14;
+	maximumRange = MAXIMUM_RANGE;
+
+	Wire.begin();
+
+	
+	//Initialize the I2C address array.
+	uint8_t addressOffset = 0; //Avoid using default address 0x52 as new address.
+	for (uint8_t index = 0; index < numberOfSensors; index++)
 	{
-		address[index] = STARTING_ADDRESS + index;
-		xshutPin[index] = STARTING_XSHUT_PIN + index;
+		if ((STARTING_ADDRESS + index) == 0x52) addressOffset = 1;
+		address[index] = STARTING_ADDRESS + index + addressOffset;
+		if (address[index] > 127)
+		{
+			address[index] -= 127;
+		}
 	}
 
-	//XSHUT pin is not protected. Do not set output high (5v) to the XSHUT pin.
-	//Use pinMode input instead, to release and pull-high by the Chip Vdd.
-	for (uint8_t index = 0; index < NUM_OF_SENSORS; index++)
-	{
-		digitalWrite(xshutPin[index], LOW);
-		pinMode(xshutPin[index], OUTPUT);
-	}
-	delay(1);
 
-	for (uint8_t index = 0; index < NUM_OF_SENSORS; index++)
+
+	/* Chip shutdown in now controlled by XSHUTN, using a NMOS inverter.
+	XSHUTN is not pulled up nor pulled down.
+	Only the first chip is controlled by arduino pin
+	*/
+
+	#ifdef DEBUG_PRINT_INITILAZATION_PROGRESS
+	Serial.println(F("Set chip 0 into reset mode."));
+	#endif //DEBUG_PRINT_INITILAZATION_PROGRESS
+
+	pinMode(xshutnPin, OUTPUT);
+	digitalWrite(xshutnPin, HIGH);//set chip 0 into reset mode. All subsequent chips should go into reset mode as well.
+
+	#ifdef DEBUG_PRINT_INITILAZATION_PROGRESS
+	Serial.println(F("All status LEDs should be off."));
+	Serial.println(F("Now configuring the sensors. LED should light up one by one."));
+	#endif //DEBUG_PRINT_INITILAZATION_PROGRESS
+
+	//delay(1000);
+
+	for (uint8_t index = 0; index < numberOfSensors; index++)
 	{
-		pinMode(xshutPin[index], INPUT); //Bring the selected sensor out of shutdown mode
-		delay(5);
-		sensor[index].setAddress(address[index]); //Reset this sensor i2c address
+		#ifdef DEBUG_PRINT_INITILAZATION_PROGRESS
+		Serial.print(F("Configuring chip "));
+		Serial.println(index);
+		#endif //DEBUG_PRINT_INITILAZATION_PROGRESS
+
+
+		//Bring one chip out of reset mode
+		if (index == 0)
+		{
+			//First chip
+			digitalWrite(xshutnPin, LOW);//Enable first chip
+		}
+		else
+		{
+			//Subsequent chips, index = 1,2,3,4...
+			sensor[index - 1].setGPIO(LOW); //Enable chips other than the first chip
+		}
+		delay(5);//Required for VL53L0X firmware booting (1.2ms max).
+
+		#ifdef DEBUG_PRINT_INITILAZATION_PROGRESS
+		Serial.print(F("  - Reset I2C address to "));
+		Serial.println(address[index]);
+		#endif //DEBUG_PRINT_INITILAZATION_PROGRESS
+
+		sensor[index].setAddress(address[index]);
+
+		#ifdef DEBUG_PRINT_INITILAZATION_PROGRESS
+		Serial.println(F("  - Initialize the sensor."));
+		#endif //DEBUG_PRINT_INITILAZATION_PROGRESS
+
 		sensor[index].init();
 		sensor[index].setTimeout(500);
+
+		//delay(1000);
+	}
+
+	#ifdef DEBUG_PRINT_INITILAZATION_PROGRESS
+	Serial.println(F("Radar array configuration completed."));
+	#endif //DEBUG_PRINT_INITILAZATION_PROGRESS
+
+
+
+	//Start continuous reading mode.
+	for (uint8_t index = 0; index < numberOfSensors; index++)
+	{
+		#ifdef DEBUG_PRINT_INITILAZATION_PROGRESS
+		Serial.print(F("Start continuous ranging mode for chip "));
+		Serial.println(index);
+		#endif //DEBUG_PRINT_INITILAZATION_PROGRESS
+
 		sensor[index].startContinuous(20);
 	}
 
-	data.seperation = 16.67;
-	data.startSensorOffset = -data.seperation * 4.5;
+	seperation = 10;
+	startSensorOffset = -seperation * 4;
 
 	hasNewData = false;
 }
@@ -54,13 +142,13 @@ void FuzzyRadar::update()
 int16_t FuzzyRadar::getAngleDegree()
 {
 	hasNewData = false;
-	return data.filteredAngle;
+	return filteredAngle;
 }
 
-int16_t FuzzyRadar::getDistanceMM()
+uint16_t FuzzyRadar::getDistanceMM()
 {
 	hasNewData = false;
-	return data.filteredMeanDistance;
+	return filteredMeanDistance;
 }
 
 void FuzzyRadar::readData()
@@ -69,10 +157,10 @@ void FuzzyRadar::readData()
 	readDataTimer = millis();
 
 
-	for (uint8_t index = STARTING_SENSOR_INDEX; index <= ENDING_SENSOR_INDEX; index++)
+	for (uint8_t index = startingSensorIndex; index <= endingSensorIndex; index++)
 	{
-		data.distance[index] = sensor[index].readReg16Bit(sensor[index].RESULT_RANGE_STATUS + 10);
-		if (data.distance[index] > MAXIMUM_RANGE) data.distance[index] = 0;
+		distance[index] = sensor[index].readReg16Bit(sensor[index].RESULT_RANGE_STATUS + 10);
+		if (distance[index] > maximumRange) distance[index] = 0;
 	}
 
 
@@ -84,16 +172,24 @@ void FuzzyRadar::calculateData()
 	resetDataValues();
 	calculateMeanDistance();
 
+	#ifdef DEBUG_PRINT_RAW_DATA_BEFORE_FILTER
+	printRawData();
+	#endif //DEBUG_PRINT_RAW_DATA_BEFORE_FILTER
 
-	if (data.meanDistance > 0)
+	if (meanDistance == 0)
+	{
+		readingCounter = 0;
+	}
+
+	if (meanDistance > 0)
 	{
 		//Deviation removal: remove the data that are too far away from mean value.
 		bool recalculateMeanDistance = false;
-		for (uint8_t index = STARTING_SENSOR_INDEX; index <= ENDING_SENSOR_INDEX; index++)
+		for (uint8_t index = startingSensorIndex; index <= endingSensorIndex; index++)
 		{
-			if ((data.distance[index]>0) && (abs(data.distance[index] - data.meanDistance) > DEVIATION_THRESHOLD))
+			if ((distance[index]>0) && (abs(distance[index] - meanDistance) > DEVIATION_THRESHOLD))
 			{
-				data.distance[index] = 0;
+				distance[index] = 0;
 				recalculateMeanDistance = true;
 			}
 		}
@@ -103,10 +199,16 @@ void FuzzyRadar::calculateData()
 			resetDataValues();
 			calculateMeanDistance();
 		}
+		//Noise removal
+		if (readingCounter < NOISE_LENGTH)
+		{
+			readingCounter++;
+			clearDataValues();
+		}
 	}
 
-	//printRawData();
-	if (data.meanDistance > 0)
+	
+	if (meanDistance > 0)
 	{
 
 		/*
@@ -131,9 +233,9 @@ void FuzzyRadar::calculateData()
 		uint8_t primaryGroupLength = 0;
 		uint8_t primaryGroupStartingIndex = 0;
 		uint16_t primaryGroupMeanDistance = 0;
-		for (uint8_t index = STARTING_SENSOR_INDEX; index <= ENDING_SENSOR_INDEX; index++) //scanning
+		for (uint8_t index = startingSensorIndex; index <= endingSensorIndex; index++) //scanning
 		{
-			if (data.distance[index] > 0)
+			if (distance[index] > 0)
 			{
 				if (currentGroupReadingCounter > 0)
 				{
@@ -156,11 +258,11 @@ void FuzzyRadar::calculateData()
 			{
 				//Serial.print(" GS=");
 				//Serial.print(index);
-				if ((data.distance[index] == 0) || (index == ENDING_SENSOR_INDEX))
+				if ((distance[index] == 0) || (index == endingSensorIndex))
 				{
 					//ending a group, or end of scanning
 					//calculate length
-					if (data.distance[index] == 0)
+					if (distance[index] == 0)
 					{
 						//zero reading, no matter end of scanning or not
 						currentGroupLength = index - currentGroupStartingIndex;
@@ -181,7 +283,7 @@ void FuzzyRadar::calculateData()
 					currentGroupTotal = 0;
 					for (uint8_t groupIndex = currentGroupStartingIndex; groupIndex <= index; groupIndex++)
 					{
-						currentGroupTotal += data.distance[groupIndex];
+						currentGroupTotal += distance[groupIndex];
 					}
 					currentGroupMeanDistance = currentGroupTotal / currentGroupLength;
 
@@ -225,95 +327,118 @@ void FuzzyRadar::calculateData()
 			} //if (currentGroupReadingCounter > 0) //a group has started //if (currentGroupReadingCounter > 0) //a group has started
 
 
-		} //for (uint8_t index = STARTING_SENSOR_INDEX; index <= ENDING_SENSOR_INDEX; index++) //scanning
+		} //for (uint8_t index = startingSensorIndex; index <= endingSensorIndex; index++) //scanning
 
 
 		if (primaryGroupLength != 0)
 		{
 			//remove non-primary data
-			for (uint8_t index = STARTING_SENSOR_INDEX; index <= ENDING_SENSOR_INDEX; index++)
+			for (uint8_t index = startingSensorIndex; index <= endingSensorIndex; index++)
 			{
 				if ((index<primaryGroupStartingIndex) || (index>(primaryGroupStartingIndex + primaryGroupLength - 1)))
 				{
-					data.distance[index] = 0;
+					distance[index] = 0;
 				}
 			}
 			calculateMeanDistance();
 		}
 
 		//get weight for each detected sensor
-		for (uint8_t index = STARTING_SENSOR_INDEX; index <= ENDING_SENSOR_INDEX; index++)
+		for (uint8_t index = startingSensorIndex; index <= endingSensorIndex; index++)
 		{
-			if (data.distance[index] > 0)
+			if (distance[index] > 0)
 			{
-				data.weight[index] = (float)data.meanDistance / (float)data.distance[index];
+				weight[index] = (float)meanDistance / (float)distance[index];
 
-				data.weightedTotal += data.weight[index] * index;
+				weightedTotal += weight[index] * index;
 			}
 
 		}
 
-		data.weightedIndex = data.weightedTotal / data.numberOfReadings;
+		weightedIndex = weightedTotal / numberOfReadings;
 
-		data.angle = data.weightedIndex * data.seperation + data.startSensorOffset;
+		angle = (weightedIndex * seperation + startSensorOffset);
 
 	}
 
 
-	if (data.meanDistanceRegister == 0)
+	if (meanDistanceRegister == 0)
 	{
 		//fill the filter with first sample value
-		data.meanDistanceRegister = data.meanDistance << MEAN_DISTANCE_FILTER_SHIFT;
-		data.filteredMeanDistance = data.meanDistance;
+		meanDistanceRegister = meanDistance << MEAN_DISTANCE_FILTER_SHIFT;
+		filteredMeanDistance = meanDistance;
 
-		data.angleRegister = data.angle << ANGLE_FILTER_SHIFT;
-		data.filteredAngle = data.angle;
+		angleRegister = angle << ANGLE_FILTER_SHIFT;
+		filteredAngle = angle;
 	}
 	else
 	{
-		if (data.meanDistance > 0)
+		if (meanDistance > 0)
 		{
 			//non-zero reading, filter the data
-			data.meanDistanceRegister = data.meanDistanceRegister - (data.meanDistanceRegister >> MEAN_DISTANCE_FILTER_SHIFT) + data.meanDistance;
-			data.filteredMeanDistance = data.meanDistanceRegister >> MEAN_DISTANCE_FILTER_SHIFT;
+			meanDistanceRegister = meanDistanceRegister - (meanDistanceRegister >> MEAN_DISTANCE_FILTER_SHIFT) + meanDistance;
+			filteredMeanDistance = meanDistanceRegister >> MEAN_DISTANCE_FILTER_SHIFT;
 
-			data.angleRegister = data.angleRegister - (data.angleRegister >> ANGLE_FILTER_SHIFT) + data.angle;
-			data.filteredAngle = data.angleRegister >> ANGLE_FILTER_SHIFT;
+			angleRegister = angleRegister - (angleRegister >> ANGLE_FILTER_SHIFT) + angle;
+			filteredAngle = angleRegister >> ANGLE_FILTER_SHIFT;
 		}
 		else
 		{
 			//zero reading, flush the filter register
-			data.meanDistanceRegister = 0;
-			data.filteredMeanDistance = 0;
+			meanDistanceRegister = 0;
+			filteredMeanDistance = 0;
 
-			data.angleRegister = 0;
-			data.filteredAngle = 0;
+			angleRegister = 0;
+			filteredAngle = 0;
 		}
 	}
 
 	
-
-
-
-
-
-	#ifdef DEBUG_SERIAL
+	#ifdef DEBUG_PRINT_RAW_DATA_AFTER_FILTER
 	printRawData();
-	#endif //DEBUG_SERIAL
+	#endif //DEBUG_PRINT_RAW_DATA_AFTER_FILTER
+
+	#ifdef DEBUG_PRINT_DISTANCE_ANGLE
+	Serial.print(" ");
+	Serial.print("Distance = ");
+	Serial.print((filteredMeanDistance < 10 ? "0" : ""));
+	Serial.print((filteredMeanDistance < 100 ? "0" : ""));
+	Serial.print((filteredMeanDistance < 1000 ? "0" : ""));
+	Serial.print(filteredMeanDistance);
+	Serial.print(" ");
+	Serial.print("Angle = ");
+	if (filteredAngle >= 0)
+	{
+		Serial.print(" ");
+		Serial.print((filteredAngle < 10 ? "0" : ""));
+		Serial.print((filteredAngle < 100 ? "0" : ""));
+		Serial.print(filteredAngle);
+	}
+	else
+	{
+		Serial.print("-");
+		Serial.print((filteredAngle > -10 ? "0" : ""));
+		Serial.print((filteredAngle > -100 ? "0" : ""));
+		Serial.print(abs(filteredAngle));
+	}
+
+	Serial.println();
+	#endif //DEBUG_PRINT_DISTANCE_ANGLE
 
 	hasNewData = true;
 }
 
 void FuzzyRadar::printRawData()
 {
-	for (uint8_t index = STARTING_SENSOR_INDEX; index <= ENDING_SENSOR_INDEX; index++)
+	Serial.print(" [");
+	for (uint8_t index = startingSensorIndex; index <= endingSensorIndex; index++)
 	{
-		if (data.distance[index] != 0)
+		if (distance[index] != 0)
 		{
-			Serial.print((data.distance[index] < 10 ? "0" : ""));
-			Serial.print((data.distance[index] < 100 ? "0" : ""));
-			Serial.print((data.distance[index] < 1000 ? "0" : ""));
-			Serial.print(data.distance[index]);
+			Serial.print((distance[index] < 10 ? "0" : ""));
+			Serial.print((distance[index] < 100 ? "0" : ""));
+			Serial.print((distance[index] < 1000 ? "0" : ""));
+			Serial.print(distance[index]);
 		}
 		else
 		{
@@ -321,42 +446,41 @@ void FuzzyRadar::printRawData()
 		}
 		Serial.print(" ");
 	}
-	Serial.print(data.numberOfReadings);
-	Serial.print(" ");
-	Serial.print(data.filteredMeanDistance);
-	Serial.print(" ");
+	Serial.print("(");
+	Serial.print((meanDistance < 10 ? "0" : ""));
+	Serial.print((meanDistance < 100 ? "0" : ""));
+	Serial.print((meanDistance < 1000 ? "0" : ""));
+	Serial.print(meanDistance);
+	Serial.print(")]");
 
-	Serial.print(data.filteredAngle);
-	Serial.print(" ");
-	Serial.println();
 }
 
 void FuzzyRadar::resetDataValues()
 {
-	data.numberOfReadings = 0;
-	data.total = 0;
-	data.meanDistance = 0;
-	data.weightedTotal = 0;
-	data.weightedIndex = 0;
-	data.angle = 0;
+	numberOfReadings = 0;
+	total = 0;
+	meanDistance = 0;
+	weightedTotal = 0;
+	weightedIndex = 0;
+	angle = 0;
 }
 
 void FuzzyRadar::calculateMeanDistance()
 {
-	data.numberOfReadings = 0;
-	data.total = 0;
-	for (uint8_t index = STARTING_SENSOR_INDEX; index <= ENDING_SENSOR_INDEX; index++)
+	numberOfReadings = 0;
+	total = 0;
+	for (uint8_t index = startingSensorIndex; index <= endingSensorIndex; index++)
 	{
-		if (data.distance[index] > 0)
+		if (distance[index] > 0)
 		{
-			data.numberOfReadings++;
-			data.total += data.distance[index];
+			numberOfReadings++;
+			total += distance[index];
 		}
 	}
 
-	if (data.numberOfReadings > 0)
+	if (numberOfReadings > 0)
 	{
-		data.meanDistance = data.total / data.numberOfReadings;
+		meanDistance = total / numberOfReadings;
 	}
 }
 
@@ -368,4 +492,14 @@ bool FuzzyRadar::available()
 void FuzzyRadar::clearAvailableFlag()
 {
 	hasNewData = false;
+}
+
+void FuzzyRadar::clearDataValues()
+{
+	//Serial.print("clearDataValues()");
+	resetDataValues();
+	for (uint8_t index = startingSensorIndex; index <= endingSensorIndex; index++)
+	{
+		distance[index] = 0;
+	}
 }

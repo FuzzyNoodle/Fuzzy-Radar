@@ -17,9 +17,10 @@ After arduino power on or reset, the status LED should light up one by one.
 
 VL53L0X sensor[NUM_OF_SENSORS];
 
-#define STARTING_ADDRESS 0x01
+#define STARTING_ADDRESS 0x53
 uint8_t address[NUM_OF_SENSORS];
 
+//User may change the XSHUTN control pin here.
 #define STARTING_CHIP_XSHUTN_PIN 2
 
 void setup()
@@ -79,7 +80,7 @@ void setup()
 
 		delay(1000);
 	}
-	Serial.print("Radar array configuration completed.");
+	Serial.println("Radar array configuration completed.");
 }
 
 void loop()
