@@ -32,12 +32,11 @@
 #define NOISE_LENGTH 1 //For consecutive readings that length is equal of less than this value, the readings are considered noise and omitted.
 
 
-#ifdef DEBUG_PRINT_RAW_DATA_BEFORE_FILTER
-#endif //DEBUG_PRINT_RAW_DATA_BEFORE_FILTER
+//Debug switches for serial output. Comment out to disable the debug code.
 //#define DEBUG_PRINT_INITILAZATION_PROGRESS
 //#define DEBUG_PRINT_RAW_DATA_BEFORE_FILTER
 //#define DEBUG_PRINT_RAW_DATA_AFTER_FILTER
-#define DEBUG_PRINT_DISTANCE_ANGLE
+//#define DEBUG_PRINT_DISTANCE_ANGLE
 
 
 
@@ -48,19 +47,20 @@ class FuzzyRadar
 public:
 	FuzzyRadar(uint8_t _numberOfSensors);
 	~FuzzyRadar();
-	void begin(uint8_t _xshutnPin, uint8_t _seperationDegrees);
+	void begin(uint8_t _xshutnPin, float _seperationDegrees);
 	void update();
 	int16_t getAngleDegree();
 	uint16_t getDistanceMM();
 	bool available();
 	void clearAvailableFlag();
-	
+	void printRawData();
+
 private:
 	VL53L0X *sensor;
 	uint8_t *address;
 	uint8_t numberOfSensors;
 	uint8_t xshutnPin;
-	uint8_t seperationDegrees;
+	//uint8_t seperationDegrees;
 	int16_t *distance;
 	uint8_t numberOfReadings;
 	float seperation;
@@ -83,7 +83,7 @@ private:
 
 	void readData();
 	void calculateData();
-	void printRawData();
+	
 	void resetDataValues();
 	void calculateMeanDistance();
 	bool hasNewData;

@@ -29,12 +29,12 @@ FuzzyRadar::~FuzzyRadar()
 	weight = NULL;
 }
 
-void FuzzyRadar::begin(uint8_t _xshutnPin, uint8_t _seperationDegrees)
+void FuzzyRadar::begin(uint8_t _xshutnPin, float _seperationDegrees)
 {
 	xshutnPin = _xshutnPin;
-	seperationDegrees = _seperationDegrees;
+	seperation = _seperationDegrees;
 	startingSensorIndex = 0;
-	endingSensorIndex = numberOfSensors-14;
+	endingSensorIndex = numberOfSensors-1;
 	maximumRange = MAXIMUM_RANGE;
 
 	Wire.begin();
@@ -128,8 +128,8 @@ void FuzzyRadar::begin(uint8_t _xshutnPin, uint8_t _seperationDegrees)
 		sensor[index].startContinuous(20);
 	}
 
-	seperation = 10;
-	startSensorOffset = -seperation * 4;
+	//set the center of the array as 0 degree
+	startSensorOffset = -seperation * ((float)(numberOfSensors-1))/2;
 
 	hasNewData = false;
 }
@@ -357,7 +357,7 @@ void FuzzyRadar::calculateData()
 
 		weightedIndex = weightedTotal / numberOfReadings;
 
-		angle = (weightedIndex * seperation + startSensorOffset);
+		angle = -(weightedIndex * seperation + startSensorOffset);
 
 	}
 
