@@ -3,6 +3,8 @@ This sketch uses the FuzzyRadar class. The class has incorporated
 the initialization process for multiple sensors. It also contains
 filtering algorithm, and output two values: distance in millimeters,
 and angle in degrees.
+
+
 */
 
 

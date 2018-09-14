@@ -19,11 +19,8 @@
 
 
 
-//#define NUM_OF_SENSORS 9
 
-//#define STARTING_SENSOR_INDEX 0
-//#define ENDING_SENSOR_INDEX 8
-#define MAXIMUM_RANGE 800
+#define DEFAULT_MAXIMUM_RANGE 900
 #define DEVIATION_THRESHOLD 200 //signals are removed if the readings is more than this threshold value (mm)
 #define STARTING_ADDRESS 0x53
 #define READ_DATA_DURATION 24
@@ -54,13 +51,13 @@ public:
 	bool available();
 	void clearAvailableFlag();
 	void printRawData();
+	void setMaximumRangeMM(int16_t _maximumRange);
 
 private:
 	VL53L0X *sensor;
 	uint8_t *address;
 	uint8_t numberOfSensors;
 	uint8_t xshutnPin;
-	//uint8_t seperationDegrees;
 	int16_t *distance;
 	uint8_t numberOfReadings;
 	float seperation;

@@ -17,6 +17,7 @@ FuzzyRadar::FuzzyRadar(uint8_t _numberOfSensors)
 	numberOfSensors = _numberOfSensors;
 
 }
+
 FuzzyRadar::~FuzzyRadar() 
 {
 	free(address);
@@ -35,7 +36,7 @@ void FuzzyRadar::begin(uint8_t _xshutnPin, float _seperationDegrees)
 	seperation = _seperationDegrees;
 	startingSensorIndex = 0;
 	endingSensorIndex = numberOfSensors-1;
-	maximumRange = MAXIMUM_RANGE;
+	maximumRange = DEFAULT_MAXIMUM_RANGE;
 
 	Wire.begin();
 
@@ -502,4 +503,9 @@ void FuzzyRadar::clearDataValues()
 	{
 		distance[index] = 0;
 	}
+}
+
+void FuzzyRadar::setMaximumRangeMM(int16_t _maximumRange)
+{
+	maximumRange = _maximumRange;
 }
